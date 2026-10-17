@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { IssueCollector, type ValidationResult } from "./issues.ts";
 import { extractNumbers, parseNumber } from "./numbers.ts";
-import { normalizeQuotes, truncate } from "./text.ts";
+import { normalizeQuotes, truncate, WORD_END, WORD_START, wordRegex } from "./text.ts";
 
 /**
  * Claim ledger ("Never invent a number", §5.3). Every factual claim in a script is listed
@@ -81,6 +81,16 @@ export const KNOWN_FAKE_STATS: readonly { id: string; pattern: RegExp; label: st
   { id: "glasses-of-water", pattern: /\b(8|eight) glasses of water\b/i, label: "everyone needs 8 glasses of water a day" },
   { id: "small-business-failure", pattern: /\b(9|nine) out of (10|ten) (startups|businesses|small businesses) fail\b|\b(80|eighty|90|ninety)(\s?%|\s?percent) of (new )?(small )?businesses fail\b/i, label: "most small businesses fail in their first year (usually misquoted)" },
   { id: "written-goals-study", pattern: /\b(3|three)(\s?%|\s?percent\b)[^.]{0,60}\bwritten goals\b|\bwritten goals\b[^.]{0,60}\b(97|ninety[- ]seven)(\s?%|\s?percent\b)/i, label: "the written-goals study (it never happened)" },
+  // Portuguese wordings of the same folklore.
+  { id: "ten-percent-brain-pt", pattern: wordRegex("(?:usa|usam|usamos|utiliza|utilizam|utilizamos|usar)[^.]{0,30}(?:10|dez)\\s?(?:%|por\\s?cento)\\s+d[oa]s?\\s+(?:nosso\\s+|seu\\s+)?c[eé]rebros?"), label: "people only use 10% of their brain" },
+  { id: "goldfish-attention-pt", pattern: wordRegex("peixe(?:s|inho)?[\\s-]dourados?[^.]{0,60}aten[cç][aã]o|aten[cç][aã]o[^.]{0,60}peixe(?:s|inho)?[\\s-]dourados?"), label: "humans have a shorter attention span than a goldfish" },
+  { id: "eight-second-attention-pt", pattern: wordRegex("(?:8|oito)\\s+segundos[^.]{0,40}aten[cç][aã]o|aten[cç][aã]o[^.]{0,40}(?:8|oito)\\s+segundos"), label: "the average attention span is 8 seconds" },
+  { id: "mehrabian-93-pt", pattern: wordRegex("(?:93|noventa\\s+e\\s+tr[eê]s)\\s?(?:%|por\\s?cento)[^.]{0,60}(?:comunica[cç][aã]o|n[aã]o[\\s-]verbal|linguagem\\s+corporal)"), label: "93% of communication is nonverbal" },
+  { id: "habit-21-days-pt", pattern: wordRegex("(?:21|vinte\\s+e\\s+um)\\s+dias[^.]{0,40}h[aá]bitos?|h[aá]bitos?[^.]{0,40}(?:21|vinte\\s+e\\s+um)\\s+dias"), label: "it takes 21 days to form a habit" },
+  { id: "rule-of-seven-pt", pattern: wordRegex("(?:7|sete)\\s+vezes[^.]{0,60}antes\\s+de\\s+compr(?:ar|arem|a)"), label: "people need to see a message 7 times before they buy" },
+  { id: "glasses-of-water-pt", pattern: wordRegex("(?:8|oito)\\s+copos\\s+de\\s+[aá]gua"), label: "everyone needs 8 glasses of water a day" },
+  { id: "small-business-failure-pt", pattern: wordRegex("(?:9|nove)\\s+(?:em|de)\\s+cada\\s+(?:10|dez)\\s+(?:startups|empresas|neg[oó]cios)[^.]{0,30}(?:fecham|quebram|falham|morrem|faliram|fecharam)|(?:80|oitenta|90|noventa)\\s?(?:%|por\\s?cento)\\s+das\\s+(?:novas\\s+)?(?:pequenas\\s+)?(?:empresas|startups)[^.]{0,30}(?:fecham|quebram|falham|morrem)"), label: "most small businesses fail in their first year (usually misquoted)" },
+  { id: "written-goals-study-pt", pattern: wordRegex("(?:3|tr[eê]s)\\s?(?:%|por\\s?cento)[^.]{0,60}metas\\s+(?:por\\s+)?escritas|metas\\s+(?:por\\s+)?escritas[^.]{0,60}(?:97|noventa\\s+e\\s+sete)\\s?(?:%|por\\s?cento)?"), label: "the written-goals study (it never happened)" },
 ];
 
 /** Returns every known fake stat the text repeats. */
@@ -96,8 +106,20 @@ export function findFakeStats(text: string): { id: string; label: string; match:
 
 const HEDGE_RE = /\b(they say|they said|says|said|according to|reports?|reported|reportedly|claims?|claimed|found that|finds that|estimates?|estimated|per (the|a|an|their|its)|suggests?|in (a|one|their) (study|survey|report))\b/i;
 
+const PT_HEDGE_RE = wordRegex(
+  "de\\s+acordo\\s+com|conforme|dizem|disse(?:ram)?|diz|afirma(?:m|ram)?|afirmou|relata(?:m|ram)?|relatou|reporta(?:m|ram)?|reportou|" +
+    "aponta(?:m|ram)?|apontou|estima(?:m|ram)?|estimou|sugere(?:m)?|sugeriu|indica(?:m|ram)?|indicou|descobri(?:u|ram)\\s+que|mostr(?:ou|aram)\\s+que|" +
+    "em\\s+(?:um|uma)\\s+(?:estudo|pesquisa|relat[oó]rio|levantamento)",
+);
+/** "Segundo" is also "second", so it only hedges before a name or a source word ("segundo a Nielsen", "segundo dados"). */
+const PT_HEDGE_SEGUNDO = new RegExp(
+  `${WORD_START}[Ss]egundo\\s+(?:\\p{Lu}|(?:o|a|os|as|um|uma|dados|pesquisas?|estudos?|relat[oó]rios?|levantamentos?)${WORD_END})`,
+  "u",
+);
+
 export function isHedged(text: string): boolean {
-  return HEDGE_RE.test(normalizeQuotes(text));
+  const t = normalizeQuotes(text);
+  return HEDGE_RE.test(t) || PT_HEDGE_RE.test(t) || PT_HEDGE_SEGUNDO.test(t);
 }
 
 type ResolvedSource =

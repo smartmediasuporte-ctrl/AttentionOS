@@ -44,6 +44,15 @@ export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Word boundaries for regex sources that, unlike `\b`, treat accented letters as letters ("não", "vídeo"). */
+export const WORD_START = "(?<![\\p{L}\\p{N}])";
+export const WORD_END = "(?![\\p{L}\\p{N}])";
+
+/** Case-insensitive Unicode regex for a pattern bounded as whole words. */
+export function wordRegex(pattern: string, flags = "i"): RegExp {
+  return new RegExp(`${WORD_START}(?:${pattern})${WORD_END}`, `${flags}u`);
+}
+
 /**
  * Case-insensitive regex for a phrase with word boundaries that work for any script.
  * Whitespace inside the phrase matches any run of whitespace; apostrophes match straight or curly.

@@ -9,7 +9,7 @@ import { extractNumbers } from "./numbers.ts";
 import { checkRemix, type RemixRules } from "./remix.ts";
 import {
   collapseSpace, contentStems, countWords, ELLIPSIS, EM_DASH, EN_DASH, escapeRegExp, findAllPhrases, findPhrase,
-  normalizeQuotes, quoteAround, sentences, tokenize, truncate,
+  normalizeQuotes, quoteAround, sentences, tokenize, truncate, WORD_END, WORD_START, wordRegex,
 } from "./text.ts";
 
 /**
@@ -230,6 +230,38 @@ export function checkBanned(
 
 const CTA_SIGNALS = /\b(comment|dm me|message me|link in (my |the )?bio|follow (me|for)|book (a|your) call|save this|share this)\b/i;
 
+const PT_SEND_VERB = "(?:manda|mande|envia|envie|chama|chame|escreve|escreva)";
+const PT_DM_PLACE = "(?:dm|direct|direto|privado|inbox)";
+
+/** Portuguese forms of each CTA ask, accepted alongside the English ones. */
+const PT_CTA = {
+  comment: wordRegex("coment(?:a|e|em|ar|[aá]rios?)"),
+  dm: wordRegex(
+    `me\\s+${PT_SEND_VERB}|${PT_SEND_VERB}${WORD_END}[^.!?]{0,30}?${WORD_START}(?:no|na|pelo|pela)\\s+${PT_DM_PLACE}|(?:dm|direct)\\s+(?:pra|para)\\s+mim`,
+  ),
+  linkInBio: wordRegex("link\\s+(?:na|da)\\s+(?:minha\\s+)?bio|link\\s+no\\s+(?:meu\\s+)?perfil"),
+  bookCall: wordRegex(
+    `(?:agenda|agende|agendar|marca|marque|marcar|reserva|reserve|reservar|garante|garanta|garantir)${WORD_END}[^.!?]{0,40}?${WORD_START}` +
+      "(?:call|chamada|liga[cç][aã]o|reuni[aã]o|conversa|consulta|consultoria|sess[aã]o|hor[aá]rio|visita|diagn[oó]stico|demo|demonstra[cç][aã]o)",
+  ),
+  follow: wordRegex("segue|siga|sigam|seguir|seguindo"),
+  saveShare: wordRegex("salv(?:a|e|em|ar)|compartilh(?:a|e|em|ar)|mand(?:a|e)|envi(?:a|e)"),
+};
+
+/** Kept narrow: "comenta" alone is also everyday speech ("ninguém comenta isso"). */
+const PT_CTA_SIGNALS = wordRegex(
+  "coment(?:a|e|em)\\s+(?:aqui|embaixo|abaixo|a\\s+palavra|nos\\s+coment[aá]rios)|me\\s+segue|segue\\s+(?:pra|para)\\s+mais|" +
+    "link\\s+(?:na|da)\\s+(?:minha\\s+)?bio|me\\s+chama\\s+(?:no|na)\\s+(?:dm|direct|privado|inbox)|agend(?:a|e)\\s+(?:uma|sua)\\s+(?:call|reuni[aã]o|conversa)|" +
+    "salv(?:a|e)\\s+(?:esse|este|isso)|compartilh(?:a|e)\\s+(?:esse|este|isso|com)",
+);
+/** "Comenta BLUEPRINT": case-sensitive, so the capitalised keyword is what marks it as an ask. */
+const PT_COMMENT_KEYWORD = new RegExp(`${WORD_START}[Cc]oment(?:a|e|em)\\s+["']?\\p{Lu}{2,}${WORD_END}`, "u");
+
+function findCtaSignal(text: string): string | null {
+  const t = normalizeQuotes(text);
+  return (CTA_SIGNALS.exec(t) ?? PT_CTA_SIGNALS.exec(t) ?? PT_COMMENT_KEYWORD.exec(t))?.[0] ?? null;
+}
+
 function checkCta(c: IssueCollector, pkg: ScriptPackage, closeText: string, rules: ScriptRules): void {
   const type = pkg.cta.type;
   const kw = pkg.cta.keyword?.trim() || null;
@@ -239,12 +271,12 @@ function checkCta(c: IssueCollector, pkg: ScriptPackage, closeText: string, rule
   const hasKwCaps = KW ? tokenize(close).some((t) => t.word === KW) : false;
   const hasKwAny = kw ? new RegExp(`\\b${escapeRegExp(kw)}\\b`, "i").test(close) : false;
 
-  const needKw = (verbRe: RegExp, verbLabel: string) => {
+  const needKw = (verbRes: RegExp[], verbLabel: string) => {
     if (!kw) {
       c.error("cta.keyword_missing", `The CTA type is ${type}, but the package has no keyword.`, { path: "cta.keyword", fix: "Reserve a keyword with the keyword ledger and put it in cta.keyword." });
       return;
     }
-    if (!verbRe.test(close)) {
+    if (!verbRes.some((re) => re.test(close))) {
       c.error("cta.mismatch", `The CTA type is ${type}, but the closing line never asks viewers to ${verbLabel}.`, { path, fix: `End with a line like "${verbLabel === "comment" ? "Comment" : "DM me"} ${KW} and I'll send it to you."` });
     }
     if (!hasKwAny) {
@@ -256,28 +288,28 @@ function checkCta(c: IssueCollector, pkg: ScriptPackage, closeText: string, rule
 
   switch (type) {
     case "comment_keyword":
-      needKw(/\bcomment\b/i, "comment");
+      needKw([/\bcomment\b/i, PT_CTA.comment], "comment");
       break;
     case "dm_keyword":
-      needKw(/\b(dm|message|text)\s+me\b|\bsend me\b/i, "DM");
+      needKw([/\b(dm|message|text)\s+me\b|\bsend me\b/i, PT_CTA.dm], "DM");
       break;
     case "link_in_bio":
-      if (!/\blink in (my |the )?bio\b/i.test(close)) c.error("cta.mismatch", 'The CTA type is link in bio, but the closing line never says "link in bio".', { path, fix: 'End with a line that sends viewers to the link in your bio.' });
+      if (!/\blink in (my |the )?bio\b/i.test(close) && !PT_CTA.linkInBio.test(close)) c.error("cta.mismatch", 'The CTA type is link in bio, but the closing line never says "link in bio".', { path, fix: 'End with a line that sends viewers to the link in your bio.' });
       break;
     case "book_call":
-      if (!/\b(book|schedule|grab|set up)\b[^.!?]{0,40}\b(call|consult|consultation|session|meeting|walkthrough|time|visit)\b/i.test(close)) {
+      if (!/\b(book|schedule|grab|set up)\b[^.!?]{0,40}\b(call|consult|consultation|session|meeting|walkthrough|time|visit)\b/i.test(close) && !PT_CTA.bookCall.test(close)) {
         c.error("cta.mismatch", "The CTA type is book a call, but the closing line never asks viewers to book one.", { path, fix: 'End with a line like "Book a call at the link in my bio."' });
       }
       break;
     case "follow":
-      if (!/\bfollow\b/i.test(close)) c.error("cta.mismatch", "The CTA type is follow, but the closing line never asks for a follow.", { path, fix: "Give one concrete reason to follow in the last line." });
+      if (!/\bfollow\b/i.test(close) && !PT_CTA.follow.test(close)) c.error("cta.mismatch", "The CTA type is follow, but the closing line never asks for a follow.", { path, fix: "Give one concrete reason to follow in the last line." });
       break;
     case "save_share":
-      if (!/\b(save|share|send)\b/i.test(close)) c.error("cta.mismatch", "The CTA type is save or share, but the closing line never asks viewers to save or share it.", { path, fix: 'End with "Save this for ..." or "Send this to ...".' });
+      if (!/\b(save|share|send)\b/i.test(close) && !PT_CTA.saveShare.test(close)) c.error("cta.mismatch", "The CTA type is save or share, but the closing line never asks viewers to save or share it.", { path, fix: 'End with "Save this for ..." or "Send this to ...".' });
       break;
     case "none": {
-      const sig = CTA_SIGNALS.exec(close);
-      if (sig) c.warn("cta.unexpected", `The CTA type is none, but the closing line says "${sig[0]}".`, { path, fix: "Remove the ask or set the CTA type that matches it." });
+      const sig = findCtaSignal(close);
+      if (sig) c.warn("cta.unexpected", `The CTA type is none, but the closing line says "${sig}".`, { path, fix: "Remove the ask or set the CTA type that matches it." });
       break;
     }
   }
@@ -443,8 +475,8 @@ export function validateScript(input: unknown, rules: ScriptRules = {}): Validat
     if (shared.length === 0) {
       c.warn("beats.no_callback", "The close doesn't echo any word from the hook, so it may not call back to it.", { path: `beats[${firstIndex.get("close")}]`, fix: "Bring back the hook's key word or image in the close." });
     }
-    const ctaInHook = CTA_SIGNALS.exec(hookBeat.text);
-    if (ctaInHook) c.error("hook.cta_in_hook", `The hook contains a call to action ("${ctaInHook[0]}").`, { path: "beats[0]", fix: "Move the ask to the close." });
+    const ctaInHook = findCtaSignal(hookBeat.text);
+    if (ctaInHook) c.error("hook.cta_in_hook", `The hook contains a call to action ("${ctaInHook}").`, { path: "beats[0]", fix: "Move the ask to the close." });
   }
 
   // CTA line matches the CTA type.

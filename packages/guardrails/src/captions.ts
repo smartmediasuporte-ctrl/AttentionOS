@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { CtaType } from "@attentionos/core";
 import { IssueCollector, zodIssuesToIssues, type ValidationResult } from "./issues.ts";
-import { EM_DASH, EN_DASH, escapeRegExp, findAllPhrases, truncate } from "./text.ts";
+import { EM_DASH, EN_DASH, escapeRegExp, findAllPhrases, truncate, WORD_END, WORD_START } from "./text.ts";
 
 /**
  * Per-platform captions: one transcript becomes strict JSON for each platform.
@@ -171,9 +171,24 @@ export function validateCaptions(captions: unknown, ctx: CaptionContext): Valida
   }
 
   const kw = keyword ? escapeRegExp(keyword) : null;
-  const commentKw = kw ? new RegExp(`\\bcomment\\b[^.\\n]{0,25}\\b${kw}\\b`, "i") : null;
-  const dmMeKw = kw ? new RegExp(`\\bdm me\\b[^.\\n]{0,15}\\b${kw}\\b`, "i") : null;
-  const linkInBio = /\blink in (my |the )?bio\b/i;
+  const S = WORD_START;
+  const E = WORD_END;
+  const anyOf = (...res: (RegExp | null)[]) => ({ test: (s: string) => res.some((re) => re?.test(s) ?? false) });
+  const commentKw = anyOf(
+    kw ? new RegExp(`\\bcomment\\b[^.\\n]{0,25}\\b${kw}\\b`, "i") : null,
+    kw ? new RegExp(`${S}coment(?:a|e|em|ar)${E}[^.\\n]{0,25}${S}${kw}${E}`, "iu") : null,
+  );
+  const dmMeKw = anyOf(
+    kw ? new RegExp(`\\bdm me\\b[^.\\n]{0,15}\\b${kw}\\b`, "i") : null,
+    kw
+      ? new RegExp(
+          `${S}(?:me\\s+)?(?:chama|chame|manda|mande|envia|envie|escreve|escreva)${E}[^.\\n]{0,30}${S}${kw}${E}` +
+            `|${S}${kw}${E}[^.\\n]{0,20}${S}(?:dm|direct|direto|privado|inbox)${E}`,
+          "iu",
+        )
+      : null,
+  );
+  const linkInBio = anyOf(/\blink in (my |the )?bio\b/i, new RegExp(`${S}link\\s+(?:na|da)\\s+(?:minha\\s+)?bio${E}|${S}link\\s+no\\s+(?:meu\\s+)?perfil${E}`, "iu"));
 
   for (const platform of CAPTION_PLATFORMS) {
     const cap = caps[platform] as Record<string, unknown> | undefined;
@@ -222,7 +237,7 @@ export function validateCaptions(captions: unknown, ctx: CaptionContext): Valida
           });
         }
       } else if (platform === "tiktok" || platform === "youtube") {
-        if (!(dmMeKw?.test(all) || linkInBio.test(all))) {
+        if (!(dmMeKw.test(all) || linkInBio.test(all))) {
           c.error("captions.offplatform_cta", `The ${label(platform)} caption needs "DM me ${keyword.toUpperCase()}" or "link in bio": comment keywords only trigger DMs on Instagram.`, {
             path: `${platform}.${field}`,
             fix: `Add "DM me ${keyword.toUpperCase()}" or "Link in bio".`,
@@ -230,7 +245,7 @@ export function validateCaptions(captions: unknown, ctx: CaptionContext): Valida
         }
       }
       const commentAllowed = platform === "instagram" || (platform === "facebook" && ctx.facebookCommentKeyword === true);
-      if (!commentAllowed && commentKw?.test(all)) {
+      if (!commentAllowed && commentKw.test(all)) {
         c.error("captions.comment_keyword_off_instagram", `The ${label(platform)} caption asks people to comment "${keyword}", but no comment automation runs there, so nobody would get the DM.`, {
           path: `${platform}.${field}`,
           fix: platform === "tiktok" || platform === "youtube" ? `Use "DM me ${keyword.toUpperCase()}" or "Link in bio".` : "Use a link line instead (link in bio, or the tracked link).",
