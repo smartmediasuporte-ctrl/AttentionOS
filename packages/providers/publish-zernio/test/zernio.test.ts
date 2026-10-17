@@ -52,6 +52,9 @@ describe("zernio accounts", () => {
     ]);
     expect(calls[0]!.headers.authorization).toMatch(/^Bearer sk_0{64}$/);
     expect(new URL(calls[0]!.url).searchParams.get("profileId")).toBe("6a0f1c2d3e4f5a6b7c8d9e00");
+    // Zernio rejects limit without page (400 "page and limit must be provided together").
+    expect(new URL(calls[0]!.url).searchParams.has("limit")).toBe(false);
+    expect(new URL(calls[0]!.url).searchParams.has("page")).toBe(false);
   });
 
   it("health reports accounts that need reconnecting, in plain language", async () => {

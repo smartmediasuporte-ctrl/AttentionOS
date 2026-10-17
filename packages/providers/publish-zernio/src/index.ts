@@ -156,7 +156,8 @@ export function create(opts: ZernioCreateOptions): ZernioProvider {
 
   async function rawAccounts() {
     requireKey();
-    const res = await http.request("GET", "/accounts", { query: { profileId: scopedProfileId, limit: 100 }, schema: accountsResponse });
+    // No page/limit: Zernio returns 400 unless both are sent, and leaving both out returns every account.
+    const res = await http.request("GET", "/accounts", { query: { profileId: scopedProfileId }, schema: accountsResponse });
     for (const a of res.accounts) {
       const pid = profileIdOf(a);
       if (pid) accountProfiles.set(a._id, pid);
