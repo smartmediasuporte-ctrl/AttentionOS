@@ -458,7 +458,8 @@ export async function checkConnection(id: ConnectionId, ws: StudioWorkspace = wo
       const key = secret(ws, "ZERNIO_API_KEY");
       if (!key) return { ok: false, detail: "Paste your Zernio API key first." };
       const profile = secret(ws, "ZERNIO_PROFILE_ID");
-      const r = await getJson(`https://zernio.com/api/v1/accounts?limit=100${profile ? `&profileId=${encodeURIComponent(profile)}` : ""}`, {
+      // No page/limit: Zernio returns 400 unless both are sent, and leaving both out returns every account.
+      const r = await getJson(`https://zernio.com/api/v1/accounts${profile ? `?profileId=${encodeURIComponent(profile)}` : ""}`, {
         headers: { authorization: `Bearer ${key}`, accept: "application/json" },
       });
       if (r.status === 401 || r.status === 403) return { ok: false, detail: "Zernio didn't accept that key. Copy it again from the Zernio dashboard." };
