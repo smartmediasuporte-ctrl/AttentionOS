@@ -386,15 +386,21 @@ export function create(opts: ZernioCreateOptions): ZernioProvider {
 
     async listPostMetrics(accountId: string, o = {}): Promise<PostMetricsSnapshot[]> {
       requireKey();
+      // Without connected accounts own-sync asks for "me": Zernio rejects anything but an account id, so read every
+      // account the key (or ZERNIO_PROFILE_ID) can see instead.
+      const scoped = /^[a-f0-9]{24}$/i.test(accountId);
       const res = await http.request("GET", "/analytics", {
-        query: { accountId, source: "all", fromDate: o.since ? o.since.slice(0, 10) : undefined, limit: Math.min(o.limit ?? 50, 100), sortBy: "date" },
+        query: {
+          ...(scoped ? { accountId } : { profileId: scopedProfileId }),
+          source: "all", fromDate: o.since ? o.since.slice(0, 10) : undefined, limit: Math.min(o.limit ?? 50, 100), sortBy: "date",
+        },
         schema: analyticsResponse,
       });
       const capturedAt = now().toISOString();
       const out: PostMetricsSnapshot[] = [];
       for (const p of res.posts) {
         const entries = p.platforms?.length
-          ? p.platforms.filter((e) => !e.accountId || acctOf(e.accountId) === accountId)
+          ? p.platforms.filter((e) => !scoped || !e.accountId || acctOf(e.accountId) === accountId)
           : [{ platform: p.platform, platformPostId: p.platformPostId, platformPostUrl: p.platformPostUrl, analytics: p.analytics, syncStatus: undefined }];
         for (const e of entries) {
           const platform = fromZernioPlatform(e.platform);

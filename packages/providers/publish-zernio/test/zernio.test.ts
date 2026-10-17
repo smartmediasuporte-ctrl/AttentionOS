@@ -279,6 +279,15 @@ describe("zernio analytics", () => {
     expect((rows[0]!.raw as { aos?: unknown }).aos).toEqual({ impressions: 5400 });
   });
 
+  it("reads every account when own-sync has none connected (\"me\"), since Zernio rejects a non-id accountId", async () => {
+    const { provider, calls } = setup([{ method: "GET", match: "/api/v1/analytics", respond: { body: f("analytics.json") } }], { ZERNIO_PROFILE_ID: "6a0f1c2d3e4f5a6b7c8d9e00" });
+    const rows = await provider.listPostMetrics("me");
+    expect(rows).toHaveLength(2); // both accounts in the fixture, no account filter
+    const q = new URL(calls[0]!.url).searchParams;
+    expect(q.has("accountId")).toBe(false);
+    expect(q.get("profileId")).toBe("6a0f1c2d3e4f5a6b7c8d9e00");
+  });
+
   it("reads other platforms' names for watch time, completion, follows and clicks, and keeps retention curves", () => {
     const tt = mapAnalytics({
       platform: "tiktok", platformPostId: "1", capturedAt: "2026-10-14T00:00:00.000Z",
