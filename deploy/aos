@@ -118,7 +118,14 @@ case "$cmd" in
       compose exec "$APP" claude setup-token || true
       say ""
       printf 'Paste the token it printed (sk-ant-oat01-…), then press Enter: '
-      IFS= read -r -s token || token=""; echo
+      IFS= read -r -s token || token=""
+      # The token is printed across two lines, so a copied one often arrives as two pasted lines: take the rest too.
+      while [ -n "$token" ] && IFS= read -r -s -t 1 more; do
+        more="$(printf '%s' "$more" | tr -d '[:space:]')"
+        case "$more" in "" | *[!A-Za-z0-9_-]*) break ;; esac
+        token="$token$more"
+      done
+      echo
       token="$(printf '%s' "$token" | tr -d '[:space:]')"
     fi
     case "$token" in

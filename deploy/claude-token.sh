@@ -70,6 +70,12 @@ if [ -z "$token" ]; then
   say "Copy the token it printed (it starts with sk-ant-oat01-) and paste it here, then press Enter."
   say "(Nothing shows while you paste. Press Enter on its own to skip for now.)"
   IFS= read -r -s token </dev/tty || token=""
+  # The token is printed across two lines, so a copied one often arrives as two pasted lines: take the rest too.
+  while [ -n "$token" ] && IFS= read -r -s -t 1 more </dev/tty; do
+    more="$(printf '%s' "$more" | tr -d '[:space:]')"
+    case "$more" in "" | *[!A-Za-z0-9_-]*) break ;; esac
+    token="$token$more"
+  done
   say ""
   token="$(printf '%s' "$token" | tr -d '[:space:]')"
 fi
